@@ -10,6 +10,7 @@ from gramps.gen.plug import Gramplet
 from qwikidata.entity import WikidataItem
 from qwikidata.linked_data_interface import get_entity_dict_from_api
 
+
 PROPERTY_END_TIME = 'P582'
 PROPERTY_START_TIME = 'P580'
 PROPERTY_LOCATED = 'P276'
@@ -17,7 +18,8 @@ PROPERTY_LOCATED_IN_ADM = 'P131'
 PROPERTY_COORDINATE_LOCATION = 'P625'
 PROPERTY_INSTANCE_OF = 'P31'
 
-INSTANCE_FORMER_COUNTY_OF_SWEDEN = 'Q64624092'
+ITEM_FORMER_COUNTY_OF_SWEDEN = 'Q64624092'
+ITEM_URBAN_AREA_IN_SWEDEN = 'Q12813115'
 ITEM_BUILDING = 'Q41176'
 ITEM_FARM = 'Q131596'
 ITEM_HAMLET = 'Q5084'
@@ -104,7 +106,7 @@ def get_place_from_wikidata(entity_id):
                 place.set_type(PlaceType.COUNTY)
             elif ITEM_COUNTY_OF_SWEDEN == instance_of:
                 place.set_type(PlaceType.COUNTY)
-            elif INSTANCE_FORMER_COUNTY_OF_SWEDEN == instance_of:
+            elif ITEM_FORMER_COUNTY_OF_SWEDEN == instance_of:
                 place.set_type(PlaceType.COUNTY)
             elif ITEM_PROVINCE_OF_SWEDEN == instance_of:
                 place.set_type(PlaceType.PROVINCE)
@@ -123,6 +125,8 @@ def get_place_from_wikidata(entity_id):
             elif ITEM_LARGE_VILLAGE == instance_of:
                 place.set_type(PlaceType.VILLAGE)
             elif ITEM_VILLAGE == instance_of:
+                place.set_type(PlaceType.VILLAGE)
+            elif ITEM_URBAN_AREA_IN_SWEDEN == instance_of:
                 place.set_type(PlaceType.VILLAGE)
             elif ITEM_HAMLET == instance_of:
                 place.set_type(PlaceType.HAMLET)

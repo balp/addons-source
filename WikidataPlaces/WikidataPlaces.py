@@ -5,7 +5,7 @@ from qwikidata.datavalue import GlobeCoordinate
 
 from gramps.gen.const import COLON, GRAMPS_LOCALE as glocale
 from gramps.gen.db import DbTxn
-from gramps.gen.lib import Place, PlaceName, PlaceType, Url
+from gramps.gen.lib import Place, PlaceName, PlaceType, Url, PlaceRef
 from gramps.gen.plug import Gramplet
 from qwikidata.entity import WikidataItem
 from qwikidata.linked_data_interface import get_entity_dict_from_api
@@ -14,6 +14,7 @@ _ = glocale.translation.sgettext
 
 
 def get_place_from_wikidata(entity_id):
+    parents = set()
     entity = WikidataItem(get_entity_dict_from_api(entity_id))
     claims_groups = entity.get_truthy_claim_groups()
     place = Place()
@@ -60,7 +61,13 @@ def get_place_from_wikidata(entity_id):
             datavalue: GlobeCoordinate = claim.mainsnak.datavalue
             place.set_latitude(str(datavalue.value['latitude']))
             place.set_longitude(str(datavalue.value['longitude']))
-    return place
+    if 'P131' in claims_groups:
+        for claim in claims_groups['P131']:
+            if claim.mainsnak.snak_datatype == 'wikibase-item':
+                parents.add(claim.mainsnak.datavalue.value["id"])
+
+
+    return place, parents
 
 
 class WikidataPlacesGramplet(Gramplet):
@@ -103,21 +110,52 @@ class WikidataPlacesGramplet(Gramplet):
         buffer = self._text_area.get_buffer()
         if len(entity_id):
             buffer.set_text(f"Adding entity {entity_id} from Wikidata.\n")
+            todo = set()
+            todo.add(entity_id)
+            done = set()
+            all_places = set()
+            links_to_add = set()
 
-            if self.dbstate.db.has_place_gramps_id(entity_id):
-                place = self.dbstate.db.get_place_from_gramps_id(entity_id)
-                wikidata_place = get_place_from_wikidata(entity_id)
-                buffer.insert(buffer.get_end_iter(), f"Updating {place.get_title()} with"
-                                                     f" wikidata {wikidata_place.get_title()}\n")
-                place.merge(wikidata_place)
-            else:
-                place = get_place_from_wikidata(entity_id)
-                buffer.insert(buffer.get_end_iter(), f"New entry: {place.get_title()}\n")
+            while len(todo) > 0:
+                current_entity = todo.pop()
+                buffer.set_text(f"Working on {current_entity}:\n")
+                done.add(current_entity)
+                wikidata_place, parents = get_place_from_wikidata(current_entity)
+                for parent in parents:
+                    if parent not in done:
+                        todo.add(parent)
+                    #  TODO Add parent refs even when child comes before
+                    if self.dbstate.db.has_place_gramps_id(parent):
+                        parent_ent = self.dbstate.db.get_place_from_gramps_id(parent)
+                        parent_ref = PlaceRef()
+                        parent_ref.set_reference_handle(parent_ent.get_handle())
+                        wikidata_place.add_placeref(parent_ref)
+                    else:
+                        links_to_add.add((current_entity, parent))
 
+                if self.dbstate.db.has_place_gramps_id(current_entity):
+                    place = self.dbstate.db.get_place_from_gramps_id(current_entity)
+                    buffer.insert(buffer.get_end_iter(), f"Updating {place.get_title()} with"
+                                                         f" wikidata {wikidata_place.get_title()}\n")
+                    place.merge(wikidata_place)
+                else:
+                    buffer.insert(buffer.get_end_iter(), f"New entry: {wikidata_place.get_title()}\n")
+                    place = wikidata_place
+                all_places.add(place)
 
-            with DbTxn(_('Add Wikidata place %s') % entity_id, self.dbstate.db) as trans:
-                self.dbstate.db.add_place(place, trans)
-                self.dbstate.db.commit_place(place, trans)
+            with DbTxn(_('Add Wikidata places'), self.dbstate.db) as trans:
+                for place in all_places:
+                    self.dbstate.db.add_place(place, trans)
+                    self.dbstate.db.commit_place(place, trans)
+
+            with DbTxn(_('Update parent references (enclosed by)'), self.dbstate.db) as trans:
+                for child, parent in links_to_add:
+                    parent_ent = self.dbstate.db.get_place_from_gramps_id(parent)
+                    parent_ref = PlaceRef()
+                    parent_ref.set_reference_handle(parent_ent.get_handle())
+                    child_ent = self.dbstate.db.get_place_from_gramps_id(child)
+                    child_ent.add_placeref(parent_ref)
+                    self.dbstate.db.commit_place(child_ent, trans)
 
         else:
             buffer.set_text(self._instruction_text)

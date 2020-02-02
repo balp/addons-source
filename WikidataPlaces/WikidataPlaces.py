@@ -10,13 +10,14 @@ from gramps.gen.plug import Gramplet
 from qwikidata.entity import WikidataItem
 from qwikidata.linked_data_interface import get_entity_dict_from_api
 
-INSTANCE_FORMER_COUNTY_OF_SWEDEN = 'Q64624092'
-
+PROPERTY_END_TIME = 'P582'
+PROPERTY_START_TIME = 'P580'
 PROPERTY_LOCATED = 'P276'
 PROPERTY_LOCATED_IN_ADM = 'P131'
 PROPERTY_COORDINATE_LOCATION = 'P625'
 PROPERTY_INSTANCE_OF = 'P31'
 
+INSTANCE_FORMER_COUNTY_OF_SWEDEN = 'Q64624092'
 ITEM_BUILDING = 'Q41176'
 ITEM_FARM = 'Q131596'
 ITEM_HAMLET = 'Q5084'
@@ -40,7 +41,6 @@ ITEM_MUNICIPALITY_OF_SWEDEN = 'Q127448'
 ITEM_PARISH = 'Q102496'
 ITEM_SOCKEN = 'Q1523821'
 ITEM_ISLAND = 'Q23442'
-
 
 _ = glocale.translation.sgettext
 
@@ -75,7 +75,7 @@ def get_place_from_wikidata(entity_id):
             wikipedia_url = Url()
             wikipedia_url.set_path(link['url'])
             wikipedia_url.set_type('Wikipedia entry')
-            wikipedia_url.set_description(f'Wikipedia {link["title"]}:{link["site"]}')
+            wikipedia_url.set_description('Wikipedia %s:%s' % (link["title"], link["site"]))
             place.add_url(wikipedia_url)
 
     # Instance of -> PlaceType
@@ -133,40 +133,30 @@ def get_place_from_wikidata(entity_id):
 
     if PROPERTY_COORDINATE_LOCATION in claims_groups:
         for claim in claims_groups[PROPERTY_COORDINATE_LOCATION]:
-            datavalue: GlobeCoordinate = claim.mainsnak.datavalue
+            datavalue = claim.mainsnak.datavalue
             place.set_latitude(str(datavalue.value['latitude']))
             place.set_longitude(str(datavalue.value['longitude']))
 
-    if PROPERTY_LOCATED_IN_ADM in claims_groups:
-        for claim in claims_groups[PROPERTY_LOCATED_IN_ADM]:
-            if claim.mainsnak.snak_datatype == 'wikibase-item':
-                item_id = claim.mainsnak.datavalue.value["id"]
-                start = None
-                end = None
-                for qualifier in claim.qualifiers.values():
-                    for qual in qualifier:
-                        if qual.snak.property_id == 'P580':  # Start time
-                            start = qual.snak.datavalue
-                        if qual.snak.property_id == 'P582':  # End time
-                            end = qual.snak.datavalue
-                parents.add((item_id, start, end))
-
-    if PROPERTY_LOCATED in claims_groups:
-        for claim in claims_groups[PROPERTY_LOCATED]:
-            if claim.mainsnak.snak_datatype == 'wikibase-item':
-                item_id = claim.mainsnak.datavalue.value["id"]
-                start = None
-                end = None
-                for qualifier in claim.qualifiers.values():
-                    for qual in qualifier:
-                        if qual.snak.property_id == 'P580':  # Start time
-                            start = qual.snak.datavalue
-                        if qual.snak.property_id == 'P582':  # End time
-                            end = qual.snak.datavalue
-                parents.add((item_id, start, end))
-
+    extract_located_in(claims_groups, PROPERTY_LOCATED_IN_ADM, parents)
+    extract_located_in(claims_groups, PROPERTY_LOCATED, parents)
 
     return place, parents
+
+
+def extract_located_in(claims_groups, located_in, parents):
+    if located_in in claims_groups:
+        for claim in claims_groups[located_in]:
+            if claim.mainsnak.snak_datatype == 'wikibase-item':
+                item_id = claim.mainsnak.datavalue.value["id"]
+                start = None
+                end = None
+                for qualifier in claim.qualifiers.values():
+                    for qual in qualifier:
+                        if qual.snak.property_id == PROPERTY_START_TIME:  # Start time
+                            start = qual.snak.datavalue
+                        if qual.snak.property_id == PROPERTY_END_TIME:  # End time
+                            end = qual.snak.datavalue
+                parents.add((item_id, start, end))
 
 
 class WikidataPlacesGramplet(Gramplet):
@@ -208,7 +198,7 @@ class WikidataPlacesGramplet(Gramplet):
         entity_id = self._entry.get_text()
         buffer = self._text_area.get_buffer()
         if len(entity_id):
-            buffer.set_text(f"Adding entity {entity_id} from Wikidata.\n")
+            buffer.set_text("Adding entity %s from Wikidata.\n" % entity_id)
             todo = set()
             todo.add((entity_id, None, None))
             done = set()
@@ -217,73 +207,25 @@ class WikidataPlacesGramplet(Gramplet):
 
             while len(todo) > 0:
                 current_entity, current_start, current_end = todo.pop()
-                buffer.insert(buffer.get_end_iter(), f"Working on {current_entity}:\n")
+                buffer.insert(buffer.get_end_iter(), "Working on %s:\n" % current_entity)
                 done.add(current_entity)
                 wikidata_place, parents = get_place_from_wikidata(current_entity)
                 for parent, start, end in parents:
                     if parent not in done:
                         todo.add((parent, start, end))
                     if self.dbstate.db.has_place_gramps_id(parent):
-                        parent_ent = self.dbstate.db.get_place_from_gramps_id(parent)
-                        parent_ref = PlaceRef()
-                        parent_ref.set_reference_handle(parent_ent.get_handle())
-                        buffer.insert(buffer.get_end_iter(), f"start: {start} end: {end}\n")
-                        if start is not None:
-                            if end is not None:
-                                date = Date()
-                                start_dict = start.get_parsed_datetime_dict()
-                                end_dict = end.get_parsed_datetime_dict()
-                                DD1 = start_dict['day']
-                                MM1 = start_dict['month']
-                                YY1 = start_dict['year']
-                                slash1 = False
-                                DD2 = end_dict['day']
-                                MM2 = end_dict['month']
-                                YY2 = end_dict['year']
-                                slash2 = False
-                                date.set(quality=None,
-                                         modifier=Date.MOD_SPAN,
-                                         calendar=None,
-                                         value=(DD1, MM1, YY1, slash1, DD2, MM2, YY2, slash2),
-                                         text=None)
-                                parent_ref.set_date_object(date=date)
-                            else:
-                                date = Date()
-                                start_dict = start.get_parsed_datetime_dict()
-                                DD1 = start_dict['day']
-                                MM1 = start_dict['month']
-                                YY1 = start_dict['year']
-                                slash1 = False
-                                date.set(quality=None,
-                                         modifier=Date.MOD_AFTER,
-                                         calendar=None,
-                                         value=(DD1, MM1, YY1, slash1),
-                                         text=None)
-                                parent_ref.set_date_object(date=date)
-                        elif end is not None:
-                            date = Date()
-                            end_dict = end.get_parsed_datetime_dict()
-                            DD1 = end_dict['day']
-                            MM1 = end_dict['month']
-                            YY1 = end_dict['year']
-                            slash1 = False
-                            date.set(quality=None,
-                                     modifier=Date.MOD_BEFORE,
-                                     calendar=None,
-                                     value=(DD1, MM1, YY1, slash1),
-                                     text=None)
-                            parent_ref.set_date_object(date=date)
+                        parent_ref = self.enclosed_by(parent, end, start)
                         wikidata_place.add_placeref(parent_ref)
                     else:
                         links_to_add.add((current_entity, parent, start, end))
-
                 if self.dbstate.db.has_place_gramps_id(current_entity):
                     place = self.dbstate.db.get_place_from_gramps_id(current_entity)
-                    buffer.insert(buffer.get_end_iter(), f"Updating {place.get_title()} with"
-                                                         f" wikidata {wikidata_place.get_title()}\n")
+                    buffer.insert(buffer.get_end_iter(),
+                                  "Updating %s with wikidata %s\n" % (place.get_title(),
+                                                                      wikidata_place.get_title()))
                     place.merge(wikidata_place)
                 else:
-                    buffer.insert(buffer.get_end_iter(), f"New entry: {wikidata_place.get_title()}\n")
+                    buffer.insert(buffer.get_end_iter(), "New entry: %s\n" % wikidata_place.get_title())
                     place = wikidata_place
                 all_places.add(place)
 
@@ -294,55 +236,7 @@ class WikidataPlacesGramplet(Gramplet):
 
             with DbTxn(_('Update parent references (enclosed by)'), self.dbstate.db) as trans:
                 for child, parent, start, end in links_to_add:
-                    parent_ent = self.dbstate.db.get_place_from_gramps_id(parent)
-                    parent_ref = PlaceRef()
-                    parent_ref.set_reference_handle(parent_ent.get_handle())
-
-                    if start is not None:
-                        if end is not None:
-                            date = Date()
-                            start_dict = start.get_parsed_datetime_dict()
-                            end_dict = end.get_parsed_datetime_dict()
-                            DD1 = start_dict['day']
-                            MM1 = start_dict['month']
-                            YY1 = start_dict['year']
-                            slash1 = False
-                            DD2 = end_dict['day']
-                            MM2 = end_dict['month']
-                            YY2 = end_dict['year']
-                            slash2 = False
-                            date.set(quality=None,
-                                     modifier=Date.MOD_SPAN,
-                                     calendar=None,
-                                     value=(DD1, MM1, YY1, slash1, DD2, MM2, YY2, slash2),
-                                     text=None)
-                            parent_ref.set_date_object(date=date)
-                        else:
-                            date = Date()
-                            start_dict = start.get_parsed_datetime_dict()
-                            DD1 = start_dict['day']
-                            MM1 = start_dict['month']
-                            YY1 = start_dict['year']
-                            slash1 = False
-                            date.set(quality=None,
-                                     modifier=Date.MOD_AFTER,
-                                     calendar=None,
-                                     value=(DD1, MM1, YY1, slash1),
-                                     text=None)
-                            parent_ref.set_date_object(date=date)
-                    elif end is not None:
-                        date = Date()
-                        end_dict = end.get_parsed_datetime_dict()
-                        DD1 = end_dict['day']
-                        MM1 = end_dict['month']
-                        YY1 = end_dict['year']
-                        slash1 = False
-                        date.set(quality=None,
-                                 modifier=Date.MOD_BEFORE,
-                                 calendar=None,
-                                 value=(DD1, MM1, YY1, slash1),
-                                 text=None)
-                        parent_ref.set_date_object(date=date)
+                    parent_ref = self.enclosed_by(parent, end, start)
 
                     child_ent = self.dbstate.db.get_place_from_gramps_id(child)
                     child_ent.add_placeref(parent_ref)
@@ -350,3 +244,42 @@ class WikidataPlacesGramplet(Gramplet):
 
         else:
             buffer.set_text(self._instruction_text)
+
+    def enclosed_by(self, parent, end, start):
+        parent_ent = self.dbstate.db.get_place_from_gramps_id(parent)
+        parent_ref = PlaceRef()
+        parent_ref.set_reference_handle(parent_ent.get_handle())
+        if start is not None:
+            if end is not None:
+                date = Date()
+
+                start_dict = start.get_parsed_datetime_dict()
+                end_dict = end.get_parsed_datetime_dict()
+                slash2 = False
+                date.set(quality=None,
+                         modifier=Date.MOD_SPAN,
+                         calendar=None,
+                         value=((start_dict['day']), (start_dict['month']), (start_dict['year']), False,
+                                (end_dict['day']), (end_dict['month']), (end_dict['year']),
+                                slash2),
+                         text=None)
+                parent_ref.set_date_object(date=date)
+            else:
+                date = Date()
+                start_dict = start.get_parsed_datetime_dict()
+                date.set(quality=None,
+                         modifier=Date.MOD_AFTER,
+                         calendar=None,
+                         value=((start_dict['day']), (start_dict['month']), (start_dict['year']), False),
+                         text=None)
+                parent_ref.set_date_object(date=date)
+        elif end is not None:
+            date = Date()
+            end_dict = end.get_parsed_datetime_dict()
+            date.set(quality=None,
+                     modifier=Date.MOD_BEFORE,
+                     calendar=None,
+                     value=((end_dict['day']), (end_dict['month']), (end_dict['year']), False),
+                     text=None)
+            parent_ref.set_date_object(date=date)
+        return parent_ref

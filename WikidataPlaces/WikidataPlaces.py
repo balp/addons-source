@@ -5,7 +5,7 @@ from qwikidata.datavalue import GlobeCoordinate
 
 from gramps.gen.const import COLON, GRAMPS_LOCALE as glocale
 from gramps.gen.db import DbTxn
-from gramps.gen.lib import Place, PlaceName, PlaceType
+from gramps.gen.lib import Place, PlaceName, PlaceType, Url
 from gramps.gen.plug import Gramplet
 from qwikidata.entity import WikidataItem
 from qwikidata.linked_data_interface import get_entity_dict_from_api
@@ -13,11 +13,61 @@ from qwikidata.linked_data_interface import get_entity_dict_from_api
 _ = glocale.translation.sgettext
 
 
+def get_place_from_wikidata(entity_id):
+    entity = WikidataItem(get_entity_dict_from_api(entity_id))
+    claims_groups = entity.get_truthy_claim_groups()
+    place = Place()
+    place.set_gramps_id(entity_id)
+
+    name = PlaceName()
+    name.set_language('sv')
+    name.set_value(entity.get_label('sv'))
+    place.set_name(name=name)
+
+    place.set_title(entity.get_label('sv'))
+    for lang in ['sv', 'en', 'de', 'fi', 'no', 'nn', 'da', 'se']:
+        wiki_name = entity.get_label(lang)
+        if len(wiki_name):
+            place_name = PlaceName()
+            place_name.set_language(lang)
+            place_name.set_value(wiki_name)
+            place.add_alternative_name(name=place_name)
+            for alias in entity.get_aliases(lang):
+                alt_name = PlaceName()
+                alt_name.set_language(lang)
+                alt_name.set_value(alias)
+                place.add_alternative_name(name=alt_name)
+
+        for link in entity.get_sitelinks(lang).values():
+            wikipedia_url = Url()
+            wikipedia_url.set_path(link['url'])
+            wikipedia_url.set_type('Wikipedia entry')
+            wikipedia_url.set_description(f'Wikipedia {link["title"]}:{link["site"]}')
+            place.add_url(wikipedia_url)
+    # Instance of -> PlaceType
+    if 'P31' in claims_groups:
+        for claim in claims_groups['P31']:
+            if 'Q102496' == claim.mainsnak.datavalue.value['id']:
+                place.set_type(PlaceType.PARISH)
+            if 'Q1523821' == claim.mainsnak.datavalue.value['id']:
+                place.set_type(PlaceType.PARISH)
+            if 'Q23442' == claim.mainsnak.datavalue.value['id']:
+                place.set_type(PlaceType.UNKNOWN)  # No islands in Gramps
+            if 'Q127448' == claim.mainsnak.datavalue.value['id']:
+                place.set_type(PlaceType.MUNICIPALITY)  # municipality of Sweden
+    if 'P625' in claims_groups:
+        for claim in claims_groups['P625']:
+            datavalue: GlobeCoordinate = claim.mainsnak.datavalue
+            place.set_latitude(str(datavalue.value['latitude']))
+            place.set_longitude(str(datavalue.value['longitude']))
+    return place
+
+
 class WikidataPlacesGramplet(Gramplet):
 
     def __init__(self, gui, nav_group=0):
-        self._entry: Optional[Gtk.Entry] = None
-        self._text_area: Optional[Gtk.TextView] = None
+        self._entry = None
+        self._text_area = None
         self._instruction_text = _("Enter a entity ID for a place in Wikidata below. "
                                    "Use the 'Look up' button to get data from Wikidata.")
         super().__init__(gui, nav_group)  # This will call init() but declare variables before
@@ -54,65 +104,16 @@ class WikidataPlacesGramplet(Gramplet):
         if len(entity_id):
             buffer.set_text(f"Adding entity {entity_id} from Wikidata.\n")
             if self.dbstate.db.has_place_gramps_id(entity_id):
-                buffer.insert(buffer.get_end_iter(),
-                              f"Existing entry\n No action taken, yet!\n")
+                place = self.dbstate.db.get_place_from_gramps_id(entity_id)
+                wikidata_place = get_place_from_wikidata(entity_id)
+                buffer.insert(buffer.get_end_iter(), f"Updating {place.get_title()} with"
+                                                     f" wikidata {wikidata_place.get_title()}\n")
+                place.merge(wikidata_place)
+
             else:
-                buffer.insert(buffer.get_end_iter(),
-                              f"New entry\n")
+                place = get_place_from_wikidata(entity_id)
+                buffer.insert(buffer.get_end_iter(), f"New entry: {place.get_title()}\n")
 
-                entity = WikidataItem(get_entity_dict_from_api(entity_id))
-                lang = 'sv'
-                buffer.insert(buffer.get_end_iter(),
-                              f"{entity.entity_id}::{entity.get_label(lang)}\n")
-                claims_groups = entity.get_truthy_claim_groups()
-                # for claim_name, claims_value in claims_groups.items():
-                #     prop = WikidataProperty(get_entity_dict_from_api(claim_name))
-                #     buffer.insert(buffer.get_end_iter(),
-                #                   f"{claim_name} -> '{prop.get_label('en')}' ({len(claims_value)})\n")
-
-                # Name
-                place = Place()
-                place.set_gramps_id(entity_id)
-                name = PlaceName()
-                name.set_language('sv')
-                name.set_value(entity.get_label('sv'))
-                place.set_name(name=name)
-                place.set_title(entity.get_label('sv'))
-
-                for lang in ['sv', 'en', 'de', 'fi', 'no', 'nn', 'da', 'se']:
-                    wiki_name = entity.get_label(lang)
-                    if len(wiki_name):
-                        place_name = PlaceName()
-                        place_name.set_language(lang)
-                        place_name.set_value(wiki_name)
-                        place.add_alternative_name(name=place_name)
-                        for alias in entity.get_aliases(lang):
-                            alt_name = PlaceName()
-                            alt_name.set_language(lang)
-                            alt_name.set_value(alias)
-                            place.add_alternative_name(name=alt_name)
-
-                # Instance of -> PlaceType
-                if 'P31' in claims_groups:
-                    buffer.insert(buffer.get_end_iter(),
-                                  f"Instance of... \n")
-                    for claim in claims_groups['P31']:
-                        buffer.insert(buffer.get_end_iter(), f"{claim.mainsnak.datavalue.value['id']}\n")
-                        if 'Q102496' == claim.mainsnak.datavalue.value['id']:
-                            place.set_type(PlaceType.PARISH)
-                        if 'Q1523821' == claim.mainsnak.datavalue.value['id']:
-                            place.set_type(PlaceType.PARISH)
-                        if 'Q23442' == claim.mainsnak.datavalue.value['id']:
-                            place.set_type(PlaceType.UNKNOWN)  # No islands in Gramps
-                        if 'Q127448' == claim.mainsnak.datavalue.value['id']:
-                            place.set_type(PlaceType.MUNICIPALITY)  # municipality of Sweden
-
-                if 'P625' in claims_groups:
-                    for claim in claims_groups['P625']:
-                        datavalue: GlobeCoordinate = claim.mainsnak.datavalue
-                        place.set_latitude(str(datavalue.value['latitude']))
-                        place.set_longitude(str(datavalue.value['longitude']))
-                buffer.insert(buffer.get_end_iter(), f"{place}\n")
 
                 with DbTxn(_('Add Wikidata place %s') % entity_id, self.dbstate.db) as trans:
                     self.dbstate.db.add_place(place, trans)
@@ -120,19 +121,3 @@ class WikidataPlacesGramplet(Gramplet):
 
         else:
             buffer.set_text(self._instruction_text)
-
-    def _mjupp(self):
-        tmp = ""
-        try:
-
-            with self.dbstate.db.get_place_tree_cursor() as cursor:
-                for handle, _place in cursor:
-                    if isinstance(_place, Place):
-                        place: Place = place
-                        tmp += f"Handle: {handle}, Place: {place}\n"
-        except NotImplementedError as e:
-            tmp += f"Not implemented Error: {e}\n"
-
-        self.set_text(f"Hello Wikidata Places!\n{tmp}")
-
-

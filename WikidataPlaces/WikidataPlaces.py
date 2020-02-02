@@ -103,21 +103,21 @@ class WikidataPlacesGramplet(Gramplet):
         buffer = self._text_area.get_buffer()
         if len(entity_id):
             buffer.set_text(f"Adding entity {entity_id} from Wikidata.\n")
+
             if self.dbstate.db.has_place_gramps_id(entity_id):
                 place = self.dbstate.db.get_place_from_gramps_id(entity_id)
                 wikidata_place = get_place_from_wikidata(entity_id)
                 buffer.insert(buffer.get_end_iter(), f"Updating {place.get_title()} with"
                                                      f" wikidata {wikidata_place.get_title()}\n")
                 place.merge(wikidata_place)
-
             else:
                 place = get_place_from_wikidata(entity_id)
                 buffer.insert(buffer.get_end_iter(), f"New entry: {place.get_title()}\n")
 
 
-                with DbTxn(_('Add Wikidata place %s') % entity_id, self.dbstate.db) as trans:
-                    self.dbstate.db.add_place(place, trans)
-                    self.dbstate.db.commit_place(place, trans)
+            with DbTxn(_('Add Wikidata place %s') % entity_id, self.dbstate.db) as trans:
+                self.dbstate.db.add_place(place, trans)
+                self.dbstate.db.commit_place(place, trans)
 
         else:
             buffer.set_text(self._instruction_text)

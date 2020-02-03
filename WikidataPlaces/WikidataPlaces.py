@@ -13,6 +13,7 @@ from qwikidata.linked_data_interface import get_entity_dict_from_api
 
 PROPERTY_END_TIME = 'P582'
 PROPERTY_START_TIME = 'P580'
+PROPERTY_LOCATED_IN_PRESENT = 'P3842'
 PROPERTY_LOCATED = 'P276'
 PROPERTY_LOCATED_IN_ADM = 'P131'
 PROPERTY_COORDINATE_LOCATION = 'P625'
@@ -141,6 +142,7 @@ def get_place_from_wikidata(entity_id):
             place.set_latitude(str(datavalue.value['latitude']))
             place.set_longitude(str(datavalue.value['longitude']))
 
+    extract_located_in(claims_groups, PROPERTY_LOCATED_IN_PRESENT, parents)
     extract_located_in(claims_groups, PROPERTY_LOCATED_IN_ADM, parents)
     extract_located_in(claims_groups, PROPERTY_LOCATED, parents)
 
